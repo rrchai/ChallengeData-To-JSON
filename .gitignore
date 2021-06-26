@@ -2,8 +2,10 @@
 .Rhistory
 .Rapp.history
 
-# Session Data files
+# Data
 .RData
+seedData
+oldData
 
 # User-specific files
 .Ruserdata
