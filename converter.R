@@ -29,7 +29,7 @@ orgs <- data.frame(id = cleanProperty(orgs_data$challengeOrganization) %>% unlis
                    shortName=orgs_data$shortName
                    ) %>% arrange(name)
 
-dirty.orgId <- orgs$organizationId[which(nchar(orgs$organizationId) > 60)]
+dirty.orgId <- orgs$id[which(nchar(orgs$id) > 60)]; dirty.orgId
 # [1] "applied-proteogenomics-organizational-learning-and-outcomes-network"            
 # [2] "eunice-kennedy-shriver-national-institute-of-child-health-and-human-development"
 clean.orgId <- c("apollo-network", "eunice-kennedy-shriver-national-institute")
@@ -39,7 +39,7 @@ message("orgId length > schema max length (60) :\n",
 
 makeQuiet(
   lapply(seq_along(dirty.orgId), function(i) {
-    orgs$organizationId <<- gsub(dirty.orgId[i], clean.orgId[i], orgs$organizationId, fixed = TRUE)
+    orgs$id <<- gsub(dirty.orgId[i], clean.orgId[i], orgs$id, fixed = TRUE)
   })
 )
 
@@ -50,18 +50,38 @@ if (overwrite) write(orgs.json, "seedData/organizations.json")
 dataProviders_data <- cleanProperty(meta$dataContributors)
 # if empty, convert to empty array
 makeQuiet(
-  lapply(seq_along(dataProvider_data), function(i) {
+  lapply(seq_along(dataProviders_data), function(i) {
     if (is.na(dataProviders_data[[i]])) {
       dataProviders_data[[i]] <<- data.frame()
     }
   })
 )
 
+dirty.orgId2 <- setdiff(unique(unlist(dataProviders_data)), orgs$id) %>% sort; dirty.orgId2
+# [1] "eunice-kennedy-shriver-national-institute-of-child-health-and-human-development"
+# [2] "applied-proteogenomics-organizational-learning-and-outcomes-network"
+clean.orgId2 <- c("apollo-network", "eunice-kennedy-shriver-national-institute")
+if (length(dirty.orgId2) > 0) {
+  message("orgId in data dataProvider not match orgId in organizations:\n", 
+          paste0("change '", dirty.orgId2, "' to '", clean.orgId2, "'", collapse = "\n")
+  )
+  makeQuiet(
+    lapply(seq_along(dirty.orgId2), function(i) {
+      lapply(seq_along(dataProviders_data), function(j) {
+        lapply(seq_along(dataProviders_data[[j]]), function(k) {
+          dataProviders_data[[j]][[k]] <<- gsub(dirty.orgId2[i], clean.orgId2[i], dataProviders_data[[j]][[k]])
+        })
+      })
+    })
+  )
+}
+
 #### Persons ####
 # data was based on Verena's mock json data and tidy up to a data frame
 persons_data <- googlesheets4::read_sheet(lanscape_url, sheet = "persons", col_types = "ccccc")
-
-persons <- persons_data %>% select(1:4) %>% nest_legacy(!challengeName, .key = "organizers")
+dirty.orgId3 <- setdiff(unique(persons_data$organizationIds), orgs$id) %>% sort; dirty.orgId3
+#
+persons <- persons_data %>% select(1:3, 5) %>% nest_legacy(!challengeName, .key = "organizers")
 persons <- merge(persons, meta, by = "challengeName", all = TRUE) %>% select(1:2)
 # if empty, change to empty data.frame, so toJSON later can convert it to an empty array
 makeQuiet(
@@ -97,7 +117,7 @@ challenges.df <-
              status = meta$challengeStatus,
              tagsIds = I(cleanProperty(meta$challengeKeywords)),
              organizerIds = I(persons$organizers[match(meta$challengeName, persons$challengeName)]),
-             dataProvider = I(dataProviders_data),
+             dataProviders = I(dataProviders_data),
              # empty for now
              grantIds = I(ifelse(meta$challengeGrants %in% grants_data$name, meta$challengeGrants, list(data.frame()))) 
   )
