@@ -2,8 +2,8 @@
 source("utlis.R")
 
 your_email_address <- "<your-email-addrerss>"
-lanscape_url <- "<annotation-sheet-url>"
-path_to_save_json <- "rocc/rocc-app/src/app/seeds/dream/"
+lanscape_url <- "<sheet url>"
+path_to_save_json <- "/rocc-app/src/app/seeds/dream/"
 options(gargle_oauth_email = your_email_address) # for googlesheet
 
 overwrite <- FALSE
@@ -79,56 +79,100 @@ if (length(dirty.orgId2) > 0) {
 #### Persons ####
 # data was based on Verena's mock json data and tidy up to a data frame
 persons_data <- googlesheets4::read_sheet(lanscape_url, sheet = "persons", col_types = "ccccc")
-dirty.orgId3 <- setdiff(unique(persons_data$organizationIds), orgs$id) %>% sort; dirty.orgId3
-#
-persons <- persons_data %>% select(1:3, 5) %>% nest_legacy(!challengeName, .key = "organizers")
-persons <- merge(persons, meta, by = "challengeName", all = TRUE) %>% select(1:2)
-# if empty, change to empty data.frame, so toJSON later can convert it to an empty array
+# remove challenge not in meta and reorder by meta's challenge name 
+diff <- setdiff(persons_data$challengeName, meta$challengeName)
+persons_data <- persons_data %>% 
+  filter(challengeName != diff) %>%
+  arrange(challengeName = factor(challengeName, levels = meta$challengeName))
+
+# dirty.orgId3 <- setdiff(unique(persons_data$organizationIds), orgs$id) %>% sort; dirty.orgId3
+
+# make fake personIDS for challenges
+use_condaenv("rocc-service", required = TRUE)
+source_python('mangoIdMaker.py')
+persons_data$organizerId <- sapply(persons_data$organizationIds, function(i)
+  ifelse(is.na(i), NA, idMaker() %>% mongoIdMaker())
+  )
+any(duplicated(na.omit(persons_data$organizerId))) # check if duplicated by any chance
+
+# prepare for challenge data - organizerIds
+persons <- lapply(meta$challengeName, function(x) {
+  persons_data$organizerId[persons_data$challengeName == x] 
+})
 makeQuiet(
-  lapply(1:nrow(persons), function(i) {
-    if (is.null(persons$organizers[[i]]) || is.na(persons$organizers[[i]]$firstName)) {
-      print(i)
-      persons$organizers[[i]] <<- I(data.frame())
+  lapply(seq_along(persons), function(i) {
+    if (is.na(persons[[i]])) {
+      persons[[i]] <<- data.frame()
     }
   })
 )
 
+# save as json in order of meta's challenge name
+persons_df <- persons_data %>% 
+  filter(!is.na(firstName)) %>% 
+  select(6, 2, 3, 5) 
+
+persons.json <- toJSON(list(persons=persons_df), pretty = TRUE)
+if (overwrite) write(persons.json, "seedData/persons-fakeIds.json")
+
+# old  ----
+# persons <- persons_data %>% select(1:3, 5) %>% nest_legacy(!challengeName, .key = "organizers")
+# # if empty, change to empty data.frame, so toJSON later can convert it to an empty array
+# makeQuiet(
+#   lapply(1:nrow(persons), function(i) {
+#     if (is.null(persons$organizers[[i]]) || is.na(persons$organizers[[i]]$firstName)) {
+#       print(i)
+#       persons$organizers[[i]] <<- I(data.frame())
+#     }
+#   })
+# )
+# old  ----
+
 #### grants ####
 # Only collected three for example
 grants_data <- googlesheets4::read_sheet(lanscape_url, sheet = "grants", col_types = "ccccc")
+# remove new line symbol
+grants_data$description <- gsub("\n", " ", grants_data$description, fixed = TRUE) 
+grants_data$grantId <- sapply(1:3, function(i) idMaker() %>% mongoIdMaker())
+# reorder and only use id, name, description
+grants_data <- grants_data[, c("grantId", "name", "description")]
 grants.json <- toJSON(list(grants=grants_data), pretty = TRUE)
-if (overwrite) write(grants.json, "seedData/grants.json")
+if (overwrite) write(grants.json, "seedData/grants-fakeIds.json")
+# TODO: below code only work when challenge only has one grant, fix when we have more info
+grants <- ifelse(meta$challengeGrants %in% grants_data$name, grants_data$grantId, list(data.frame()))
 
 #### challenges ####
 # trim summary to short descriptions for now
+meta$challengeSummary <- gsub("\n|/", " ", meta$challengeSummary, fixed = TRUE) 
 short_summary <- 
   ifelse(nchar(meta$challengeSummary) > 280, 
          paste0(substr(meta$challengeSummary, 1, 276), " ..."),
          meta$challengeSummary)
 
-challenges.df <- 
+challenges.df <-
   data.frame(name = meta$challengeName,
              description = short_summary,
              summary = meta$challengeSummary,
              # if no dates aka NA, it will be excluded
-             startDate = as.character(as.Date(meta$challengeStart, "%Y-%m-%d")), 
-             endDate = as.character(as.Date(meta$challengeEnd, "%Y-%m-%d")),
+             startDate = as.Date(meta$challengeStart, "%Y-%m-%d"), 
+             endDate = as.Date(meta$challengeEnd, "%Y-%m-%d"),
              url = paste0("https://www.synapse.org/#!Synapse:", meta$challengeSite),
              status = meta$challengeStatus,
-             tagsIds = I(cleanProperty(meta$challengeKeywords)),
-             organizerIds = I(persons$organizers[match(meta$challengeName, persons$challengeName)]),
-             dataProviders = I(dataProviders_data),
+             tagIds = I(cleanProperty(meta$challengeKeywords)),
+             organizerIds = I(persons),
+             dataProviderIds = I(dataProviders_data),
              # empty for now
-             grantIds = I(ifelse(meta$challengeGrants %in% grants_data$name, meta$challengeGrants, list(data.frame()))) 
+             grantIds = I(grants) 
   )
-challenges.json <- prettify(toJSON(list(challenges=challenges.df)), indent = 2);challenges.json
+challenges.json <- prettify(toJSON(list(challenges=challenges.df), pretty = T), indent = 2)
 
-if (overwrite) write(challenges.json, "seedData/challenges.json")
+if (overwrite) write(challenges.json, "seedData/challenges-fakeIds.json")
 
 # cp file to rocc-app
 if (overwrite) {
   system(paste0('cp seedData/tags.json ', path_to_save_json))
-  system(paste0('cp seedData/organizations.json ', path_to_save_json))
-  system(paste0('cp seedData/grants.json ', path_to_save_json))
-  system(paste0('cp seedData/challenges.json ', path_to_save_json))
+  system(paste0('cp seedData/organizations-fix.json ', path_to_save_json))
+  system(paste0('cp seedData/grants-fakeIds.json ', path_to_save_json))
+  system(paste0('cp seedData/persons-fakeIds.json ', path_to_save_json))
+  system(paste0('cp seedData/challenges-fakeIds.json ', path_to_save_json))
 }

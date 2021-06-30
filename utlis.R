@@ -2,7 +2,7 @@ if(!suppressWarnings(require("pacman", character.only = TRUE))) {
   install.packages("pacman", repos = "https://cran.r-project.org/")
 }
 
-pkg_list <- c("tidyverse", "readr", "jsonlite", "readr", "googlesheets4")
+pkg_list <- c("tidyverse", "readr", "jsonlite", "readr", "googlesheets4", "reticulate")
 pacman::p_load(pkg_list, character.only = TRUE)
 
 
@@ -34,6 +34,13 @@ maxLength <- function(x, sep = ",") {
 makeQuiet <- function(expr) { 
   invisible(capture.output(suppressMessages(suppressWarnings(expr)))) 
 } 
+
+idMaker <- function(n = 12)
+{
+  char <- sample(c(letters, 0:9), n, replace=T)
+  ids <- paste0(char, collapse = "") 
+  return(ids)
+}
 
 
 ## Dummy codes that used to extract persons information from mock data
