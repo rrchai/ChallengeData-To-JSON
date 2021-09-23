@@ -19,7 +19,8 @@ meta <- googlesheets4::read_sheet(lanscape_url, sheet = "challenges") %>%
 topics <- cleanProperty(meta$challengeKeywords)
 
 #### Organizations ####
-orgs <- googlesheets4::read_sheet(lanscape_url, sheet = "organizations", col_types = "ccc")
+orgs <- googlesheets4::read_sheet(lanscape_url, sheet = "organizations", col_types = "ccc") %>% 
+  janitor::remove_empty(which = "rows")
 
 ## validation
 org_invalid <- orgs$challengeOrganization[which(nchar(orgs$challengeOrganization) > 60)]; org_invalid
@@ -29,6 +30,10 @@ if (length(org_invalid) > 0) {
 
 ## create orgs login
 org_logins <- cleanProperty(orgs$challengeOrganization) %>% unlist
+## create orgs avatar
+orgs_avatar <- ifelse(file.exists(file.path(path_to_rocc_app, "images/logo/", paste0(org_logins,".png"))),
+                      paste0("https://github.com/Sage-Bionetworks/rocc-app/raw/main/images/logo/", org_logins, ".png"),
+                      "")
 ## create orgs json
 orgs_df <- data.frame(id=replicate(nrow(orgs), mongoIdMaker()),
                       login=org_logins,
@@ -36,11 +41,8 @@ orgs_df <- data.frame(id=replicate(nrow(orgs), mongoIdMaker()),
                       description=c("This is an awesome organization"),
                       email=c("contact@example.org"),
                       websiteUrl=orgs$url,
-                      avatarUrl= paste0("https://github.com/Sage-Bionetworks/rocc-app/raw/main/images/logo/", 
-                                        org_logins,
-                                        ".png")
+                      avatarUrl= orgs_avatar
                       ) %>% arrange(name)
-
 orgs_json <- toJSON(list(organizations=orgs_df), pretty = TRUE)
 if (overwrite) write(orgs_json, "seedData/organizations.json")    
 
@@ -68,7 +70,7 @@ persons <- persons %>%
 
 ## clean up person names
 person_names <- cleanProperty(persons$fullName, type = "name") %>% unlist()
-## create orgs json
+## create persons json
 persons_df <- data.frame(
                 id=replicate(nrow(persons), mongoIdMaker()),
                 login=cleanProperty(person_names) %>% unlist(),
@@ -79,26 +81,30 @@ persons_df <- data.frame(
 ) %>% arrange(name)
 
 ## save as users.json
-persons.json <- toJSON(list(users=persons_df), pretty = TRUE)
-if (overwrite) write(persons.json, "seedData/users.json")
+persons_json <- toJSON(list(users=persons_df), pretty = TRUE)
+if (overwrite) write(persons_json, "seedData/users.json")
 
-#### grants ####
-# Only collected three for example
-grants_data <- googlesheets4::read_sheet(lanscape_url, sheet = "grants", col_types = "ccccc")
-# remove new line symbol
-grants_data$description <- gsub("\n", " ", grants_data$description, fixed = TRUE) 
-grants_data$grantId <- sapply(1:3, function(i) idMaker() %>% mongoIdMaker())
-# reorder and only use id, name, description
-grants_data <- grants_data[, c("grantId", "name", "description")]
-colnames(grants_data)[1] <- "id"
-grants.json <- toJSON(list(grants=grants_data), pretty = TRUE)
-if (overwrite) write(grants.json, "seedData/grants.json")
-# TODO: below code only work when challenge only has one grant, fix when we have more info
-grants <- sapply(meta$challengeGrants, function(g) {
-  name <- intersect(g, grants_data$name)
-  if (length(name) > 0) return(grants_data$grantId[grants_data$name == name]) else list(data.frame())
-  # })ifelse(meta$challengeGrants %in% grants_data$name, grants_data$grantId, list(data.frame()))
-})
+#### Challenge Platforms ####
+platforms <- googlesheets4::read_sheet(lanscape_url, sheet = "platforms", col_types = "cc") %>% 
+  janitor::remove_empty(which = "rows")
+## create platform login
+platform_logins <- cleanProperty(platforms$platformName) %>% unlist()
+## create platform avatar
+platform_avatar <- ifelse(file.exists(file.path(path_to_rocc_app, "images/logo/", paste0(platform_logins,".png"))),
+                          paste0("https://github.com/Sage-Bionetworks/rocc-app/raw/main/images/logo/", platform_logins, ".png"),
+                          "")
+## create platform json
+platforms_df <- data.frame(
+  id=replicate(nrow(platforms), mongoIdMaker()),
+  name=platform_logins,
+  displayName=platforms$platformName,
+  websiteUrl=platforms$url,
+  avatarUrl=platform_avatar
+) %>% arrange(name)
+platforms_json <- toJSON(list(users=platforms_df), pretty = TRUE)
+if (overwrite) write(platforms_json, "seedData/challenge-platforms.json")
+
+
 #### challenges ####
 # trim summary to short descriptions for now
 meta$challengeSummary <- gsub("\n", " ", meta$challengeSummary, fixed = TRUE) 
