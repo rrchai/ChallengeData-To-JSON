@@ -5,6 +5,8 @@ if(!suppressWarnings(require("pacman", character.only = TRUE))) {
 pkg_list <- c("tidyverse", "readr", "jsonlite", "googlesheets4", "reticulate")
 pacman::p_load(pkg_list, character.only = TRUE)
 
+use_condaenv("rocc-service", required = TRUE)
+source_python("mongoIdMaker.py")
 
 cleanProperty <- function(property, collapse=FALSE) {
   

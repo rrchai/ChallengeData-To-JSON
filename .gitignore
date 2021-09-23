@@ -1,16 +1,11 @@
 # History files
-.Rhistory
-.Rapp.history
+*.Rhistory
 
 # Data
-.RData
-seedData
-oldData
+*.RData
 *.csv
-
-# knitr and R markdown default cache directories
-*_cache/
-/cache/
+!validation.csv
+seedData/
 
 # R Environment Variables
 config.R

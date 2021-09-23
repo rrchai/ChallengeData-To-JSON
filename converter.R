@@ -1,3 +1,7 @@
+### This script is to convert challenge data to json format following the ROCC schema
+### The following json files may use mock up property for development purpose:
+### 1. organizations.json
+
 source("utlis.R")
 source("config.R")
 
@@ -11,45 +15,54 @@ meta <- googlesheets4::read_sheet(lanscape_url, sheet = "challenges") %>%
   mutate(across(everything(), as.character)) %>% 
   janitor::remove_empty(which = "rows")
 
+# read fix csv
+if (file.exists("validation.csv")) {
+  fix <- readr::read_csv("validation.csv", col_types = cols(.default = "c")) %>% janitor::remove_empty(which = "rows")
+} else {
+  fix <- data.frame(matrix(ncol = 3, nrow = 0)) %>% `colnames<-`(c("invalid", "valid", "type"))
+}
+
 #### Topics ####
 topics <- cleanProperty(meta$challengeKeywords)
 
-#### Org ####
-#create org id using tags method
-orgs_data <- googlesheets4::read_sheet(lanscape_url, sheet = "organizations", col_types = "ccc")
-orgs_data$shortName <- ifelse(orgs_data$shortName == "", NA, orgs_data$shortName)
-orgs <- data.frame(id = cleanProperty(orgs_data$challengeOrganization) %>% unlist,
-                   name=orgs_data$challengeOrganization,
-                   url=orgs_data$url,
-                   shortName=orgs_data$shortName
-                   ) %>% arrange(name)
+#### Organizations ####
+orgs <- googlesheets4::read_sheet(lanscape_url, sheet = "organizations", col_types = "ccc")
+# create mongoIds
+org_ids <- replicate(nrow(orgs), mongoIdMaker())
 
-# Validation of nchar
-dirty.orgId <- orgs$id[which(nchar(orgs$id) > 60)]; dirty.orgId
-# [1] "applied-proteogenomics-organizational-learning-and-outcomes-network"            
-# [2] "critical-assessment-of-protein-function-annotation-algorithms"                  
-# [3] "eunice-kennedy-shriver-national-institute-of-child-health-and-human-development"
-# [4] "united-states-army-medical-research-institute-of-infectious-diseases"          
-clean.orgId <- c("apollo-network", 
-                 "critical-assessment-of-protein-function-annotation-algorithm", 
-                 "eunice-kennedy-shriver-national-institute",
-                 "us-army-medical-research-institute-of-infectious-diseases")
-
-makeQuiet(
-  lapply(seq_along(dirty.orgId), function(i) {
-    orgs$id <<- gsub(dirty.orgId[i], clean.orgId[i], orgs$id, fixed = TRUE)
-  })
-)
-
-dirty.orgId <- orgs$id[which(nchar(orgs$id) > 60)]; dirty.orgId
-
-if (length(dirty.orgId) > 0 ) {
-  print(dirty.orgId)
-  stop("orgId length > schema max length (60) :\n")
+## validate orgs length
+# fix if there are existing corrections
+if (nrow(fix) > 0) {
+  items <- fix %>% filter(type == "org_name")
+  makeQuiet(
+    lapply(1:nrow(items), function(i) {
+      item <- items[i, ]
+      orgs$challengeOrganization <<- gsub(item$invalid, item$valid, orgs$challengeOrganization, fixed = TRUE)
+    })
+  )
 }
 
-orgs.json <- toJSON(list(organizations=orgs), pretty = TRUE)
-if (overwrite) write(orgs.json, "seedData/organizations.json")    
+org_invalid <- orgs$challengeOrganization[which(nchar(orgs$challengeOrganization) > 60)]; org_invalid
+
+if (length(org_invalid) > 0) {
+  fix <- rbind(fix, data.frame(invalid=org_invalid, valid=c(""), type="org_name"))
+  write_csv(fix, "validation.csv")
+  stop(sQuote(org_invalid[1]), " > schema max length (60) :\n")
+}
+
+orgs_df <- data.frame(id=org_ids,
+                      login=cleanProperty(orgs$challengeOrganization) %>% unlist,
+                      name=orgs$challengeOrganization,
+                      description=c("This is an awesome organization"),
+                      email=c("contact@example.org"),
+                      websiteUrl=orgs$url,
+                      avatarUrl= paste0("https://github.com/Sage-Bionetworks/rocc-app/raw/main/images/logo/", 
+                                        org_logins,
+                                        ".png")
+                      ) %>% arrange(name)
+
+orgs_json <- toJSON(list(organizations=orgs_df), pretty = TRUE)
+if (overwrite) write(orgs_json, "seedData/organizations.json")    
 
 #### dataProviders ####
 dataProviders_data <- cleanProperty(meta$dataContributors)
