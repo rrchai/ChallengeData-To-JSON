@@ -4,7 +4,6 @@
 # Data
 *.RData
 *.csv
-!validation.csv
 seedData/
 
 # R Environment Variables
