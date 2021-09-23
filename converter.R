@@ -152,7 +152,12 @@ challenges_json <- prettify(toJSON(list(challenges=challenges_df), pretty = T), 
 if (overwrite) write(challenges_json, "seedData/challenges.json")
 
 #### Challenge READMEs ####
-
+readmes_df <- data.frame(
+  challengeId=challenges_df$id,
+  text=trimws(meta$challengeSummary, "both")
+)
+readmes_json <- prettify(toJSON(list(challengeReadmes=readmes_df), pretty = T), indent = 2)
+if (overwrite) write(readmes_json, "seedData/challenge-readmes.json")
 
 # cp file to rocc-app
 if (overwrite) {
