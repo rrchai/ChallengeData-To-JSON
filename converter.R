@@ -111,7 +111,6 @@ org_members_df <- data.frame(
 org_members_json <- toJSON(list(orgMemberships=org_members_df), pretty = TRUE)
 if (overwrite) write(org_members_json, "seedData/org-memberships.json")
 
-
 #### Challenge Platforms ####
 platforms <- googlesheets4::read_sheet(lanscape_url, sheet = "platforms", col_types = "cc") %>% 
   janitor::remove_empty(which = "rows")
@@ -133,31 +132,24 @@ platforms_json <- toJSON(list(users=platforms_df), pretty = TRUE)
 if (overwrite) write(platforms_json, "seedData/challenge-platforms.json")
 
 #### challenges ####
-# trim summary to short descriptions for now
-meta$challengeSummary <- gsub("\n", " ", meta$challengeSummary, fixed = TRUE) 
-short_summary <- 
-  ifelse(nchar(meta$challengeSummary) > 280, 
-         paste0(substr(meta$challengeSummary, 1, 276), " ..."),
-         meta$challengeSummary)
-
-challenges.df <-
-  data.frame(name = meta$challengeName,
-             description = short_summary,
-             summary = meta$challengeSummary,
-             # if no dates aka NA, it will be excluded
-             startDate = as.Date(meta$challengeStart, "%Y-%m-%d"), 
-             endDate = as.Date(meta$challengeEnd, "%Y-%m-%d"),
-             url = paste0("https://www.synapse.org/#!Synapse:", meta$challengeSite),
-             status = meta$challengeStatus,
-             tagIds = I(cleanProperty(meta$challengeKeywords)),
-             organizerIds = I(persons),
-             dataProviderIds = I(dataProviders_data),
-             # empty for now
-             grantIds = I(grants) 
+challenges_df <- data.frame(
+  id=replicate(nrow(meta), mongoIdMaker()),
+  name=cleanProperty(meta$challengeName) %>% unlist(),
+  displayName=meta$challengeName,
+  description=c("This challenge is an awesome challenge."),
+  startDate=meta$challengeStart,
+  endDate=meta$challengeEnd,
+  websiteUrl=meta$challengeSite,
+  status=meta$challengeStatus,
+  platformId=platforms_df$id[match(meta$challengePlatform, platforms_df$name)],
+  ownerId=orgs_df$id[match(meta$challengeHost, orgs_df$name)],
+  topics=I(cleanProperty(meta$challengeKeywords)),
+  fullName=c(""),
+  createdAt=c(""),
+  updatedAt=c("")
   )
-challenges.json <- prettify(toJSON(list(challenges=challenges.df), pretty = T), indent = 2)
-
-if (overwrite) write(challenges.json, "seedData/challenges.json")
+challenges_json <- prettify(toJSON(list(challenges=challenges_df), pretty = T), indent = 2)
+if (overwrite) write(challenges_json, "seedData/challenges.json")
 
 #### Challenge READMEs ####
 
