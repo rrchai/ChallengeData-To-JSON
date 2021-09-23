@@ -1,8 +1,8 @@
-
 source("utlis.R")
 source("config.R")
+
 options(gargle_oauth_email = your_email_address) # for googlesheet
-overwrite <- FALSE
+overwrite <- TRUE
 
 dir.create("seedData", showWarnings = FALSE)
 
@@ -11,11 +11,8 @@ meta <- googlesheets4::read_sheet(lanscape_url, sheet = "challenges") %>%
   mutate(across(everything(), as.character)) %>% 
   janitor::remove_empty(which = "rows")
 
-#### tags ####
-tags <- cleanProperty(meta$challengeKeywords) %>% unlist %>% unique
-tags.json <- toJSON(list(tags=data.frame(id=tags, description="")), pretty = TRUE)
-
-if (overwrite) write(tags.json, "seedData/tags.json")
+#### Topics ####
+topics <- cleanProperty(meta$challengeKeywords)
 
 #### Org ####
 #create org id using tags method
