@@ -1,12 +1,12 @@
 ### This script is to convert challenge data to json format following the ROCC schema
 ### The some json files may use mock up property for development purpose:
-
 # to assign empty array <- I(data.frame())
+
 source("utlis.R")
 source("config.R")
 
 options(gargle_oauth_email = your_email_address) # for googlesheet
-overwrite <- TRUE
+overwrite <- FALSE
 
 dir.create("seedData", showWarnings = FALSE)
 
@@ -179,6 +179,6 @@ readmes_json <- prettify(toJSON(list(challengeReadmes = readmes_df), pretty = T)
 if (overwrite) write(readmes_json, "seedData/challenge-readmes.json")
 
 # cp file to rocc-app
-if (overwrite) {
-  system(paste0("cp seedData/*.json ", path_to_rocc_app, "src/app/seeds/production"))
-}
+# if (overwrite) {
+#   system(paste0("cp seedData/*.json ", path_to_rocc_app, "src/app/seeds/production/"))
+# }
