@@ -6,7 +6,7 @@ source("utlis.R")
 source("config.R")
 
 options(gargle_oauth_email = your_email_address) # for googlesheet
-overwrite <- FALSE
+overwrite <- TRUE
 
 dir.create("seedData", showWarnings = FALSE)
 
@@ -138,7 +138,7 @@ platforms_df <- data.frame(
   websiteUrl = platforms$url,
   avatarUrl = platform_avatar
 ) %>% arrange(name)
-platforms_json <- toJSON(list(users = platforms_df), pretty = TRUE)
+platforms_json <- toJSON(list(challengePlatforms = platforms_df), pretty = TRUE)
 if (overwrite) write(platforms_json, "seedData/challenge-platforms.json")
 
 #### challenges ####
@@ -179,6 +179,6 @@ readmes_json <- prettify(toJSON(list(challengeReadmes = readmes_df), pretty = T)
 if (overwrite) write(readmes_json, "seedData/challenge-readmes.json")
 
 # cp file to rocc-app
-# if (overwrite) {
-#   system(paste0("cp seedData/*.json ", path_to_rocc_app, "src/app/seeds/production/"))
-# }
+if (overwrite) {
+  system(paste0("cp seedData/*.json ", path_to_rocc_app, "src/app/seeds/production/"))
+}
