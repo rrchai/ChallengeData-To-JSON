@@ -1,7 +1,5 @@
 from bson.objectid import ObjectId
 
-def mongoIdMaker(x):
+def mongoIdMaker():
   
-  id = ObjectId(bytes(x, encoding='utf-8'))
-  id = str(id)
-  return id
+  return str(ObjectId())

@@ -1,6 +1,10 @@
+### This script is to convert challenge data to json format following the ROCC schema
+### The some json files may use mock up property for development purpose:
+# to assign empty array <- I(data.frame())
 
 source("utlis.R")
 source("config.R")
+
 options(gargle_oauth_email = your_email_address) # for googlesheet
 overwrite <- FALSE
 
@@ -8,186 +12,178 @@ dir.create("seedData", showWarnings = FALSE)
 
 ## Load Challenge Landscape sheet
 meta <- googlesheets4::read_sheet(lanscape_url, sheet = "challenges") %>%
-  mutate(across(everything(), as.character)) %>% 
+  mutate(across(everything(), as.character)) %>%
   janitor::remove_empty(which = "rows")
 
-#### tags ####
-tags <- cleanProperty(meta$challengeKeywords) %>% unlist %>% unique
-tags.json <- toJSON(list(tags=data.frame(id=tags, description="")), pretty = TRUE)
+#### Topics ####
+topics <- cleanProperty(meta$challengeKeywords)
 
-if (overwrite) write(tags.json, "seedData/tags.json")
+#### Organizations ####
+orgs <- googlesheets4::read_sheet(lanscape_url, sheet = "organizations", col_types = "ccc") %>%
+  janitor::remove_empty(which = "rows")
 
-#### Org ####
-#create org id using tags method
-orgs_data <- googlesheets4::read_sheet(lanscape_url, sheet = "organizations", col_types = "ccc")
-orgs_data$shortName <- ifelse(orgs_data$shortName == "", NA, orgs_data$shortName)
-orgs <- data.frame(id = cleanProperty(orgs_data$challengeOrganization) %>% unlist,
-                   name=orgs_data$challengeOrganization,
-                   url=orgs_data$url,
-                   shortName=orgs_data$shortName
-                   ) %>% arrange(name)
-
-# Validation of nchar
-dirty.orgId <- orgs$id[which(nchar(orgs$id) > 60)]; dirty.orgId
-# [1] "applied-proteogenomics-organizational-learning-and-outcomes-network"            
-# [2] "critical-assessment-of-protein-function-annotation-algorithms"                  
-# [3] "eunice-kennedy-shriver-national-institute-of-child-health-and-human-development"
-# [4] "united-states-army-medical-research-institute-of-infectious-diseases"          
-clean.orgId <- c("apollo-network", 
-                 "critical-assessment-of-protein-function-annotation-algorithm", 
-                 "eunice-kennedy-shriver-national-institute",
-                 "us-army-medical-research-institute-of-infectious-diseases")
-
-makeQuiet(
-  lapply(seq_along(dirty.orgId), function(i) {
-    orgs$id <<- gsub(dirty.orgId[i], clean.orgId[i], orgs$id, fixed = TRUE)
-  })
-)
-
-dirty.orgId <- orgs$id[which(nchar(orgs$id) > 60)]; dirty.orgId
-
-if (length(dirty.orgId) > 0 ) {
-  print(dirty.orgId)
-  stop("orgId length > schema max length (60) :\n")
+## validation
+org_invalid <- orgs$challengeOrganization[which(nchar(orgs$challengeOrganization) > 60)]
+org_invalid
+if (length(org_invalid) > 0) {
+  stop(sQuote(org_invalid[1]), " > schema max length (60) :\n")
 }
 
-orgs.json <- toJSON(list(organizations=orgs), pretty = TRUE)
-if (overwrite) write(orgs.json, "seedData/organizations.json")    
-
-#### dataProviders ####
-dataProviders_data <- cleanProperty(meta$dataContributors)
-# if empty, convert to empty array
-makeQuiet(
-  lapply(seq_along(dataProviders_data), function(i) {
-    if (is.na(dataProviders_data[[i]])) {
-      dataProviders_data[[i]] <<- data.frame()
-    }
-  })
+## create orgs login
+org_logins <- cleanProperty(orgs$challengeOrganization) %>% unlist()
+## create orgs avatar
+orgs_avatar <- ifelse(file.exists(file.path(path_to_rocc_app, "images/logo/", paste0(org_logins, ".png"))),
+  paste0("https://github.com/Sage-Bionetworks/rocc-app/raw/main/images/logo/", org_logins, ".png"),
+  NA
 )
-
-if (length(clean.orgId) > 0) {
-  makeQuiet(
-    lapply(seq_along(dirty.orgId), function(i) {
-      lapply(seq_along(dataProviders_data), function(j) {
-        lapply(seq_along(dataProviders_data[[j]]), function(k) {
-          dataProviders_data[[j]][[k]] <<- gsub(dirty.orgId[i], clean.orgId[i], dataProviders_data[[j]][[k]])
-        })
-      })
-    })
-  )
-}
+## create orgs json
+orgs_df <- data.frame(
+  id = replicate(nrow(orgs), mongoIdMaker()),
+  login = org_logins,
+  name = orgs$challengeOrganization,
+  description = c("This is an awesome organization"),
+  email = c("contact@example.org"),
+  websiteUrl = orgs$url,
+  avatarUrl = orgs_avatar
+) %>% arrange(name)
+orgs_json <- toJSON(list(organizations = orgs_df), pretty = TRUE)
+if (overwrite) write(orgs_json, "seedData/organizations.json")
 
 #### Persons ####
-# data was based on the mock json data and tidy up to a data frame
-persons_data <- googlesheets4::read_sheet(lanscape_url, sheet = "persons", col_types = "cccccc")[,-1]
+persons <- googlesheets4::read_sheet(lanscape_url, sheet = "persons", col_types = "ccc") %>%
+  drop_na(challengeName, fullName)
 
-# remove challenge not in meta and reorder by meta's challenge name 
-setdiff(persons_data$challengeName, meta$challengeName) 
-# match meta orders 
-persons_data <- persons_data %>% arrange(challengeName = factor(challengeName, levels = meta$challengeName))
-# add validation for orgID if needed
+## validation
+person_challenge_invalid <- setdiff(persons$challengeName, meta$challengeName)
+if (length(person_challenge_invalid) > 0) {
+  stop(paste0(sQuote(person_challenge_invalid), collapse = ", "), " not match the name in challenges")
+}
 
-# make fake personIDS for challenges
-use_condaenv("rocc-service", required = TRUE)
-source_python("mongoIdMaker.py")
-set.seed(1111)
-
-persons_data$id <- sapply(persons_data$firstName, function(i)
-  ifelse(is.na(i), NA, idMaker() %>% mongoIdMaker())
+person_org_invalid <-
+  setdiff(
+    cleanProperty(persons$organizations, ",") %>% unlist() %>% unique() %>% na.omit(),
+    orgs_df$login
   )
-any(duplicated(na.omit(persons_data$id))) # check if duplicated by any chance
+if (length(person_org_invalid) > 0) {
+  stop(paste0(sQuote(person_org_invalid), collapse = ", "), " not match the name in organizations")
+}
 
-# prepare for challenge data - organizerIds
-persons <- lapply(meta$challengeName, function(x) {
-  persons_data$id[persons_data$challengeName == x] 
-})
-makeQuiet(
-  lapply(seq_along(persons), function(i) {
-    if (length(persons[[i]]) == 0) {
-      persons[[i]] <<- data.frame()
-    }
-  })
+## only take unique persons for now, for users.json
+users <- unique(persons$fullName) %>% trimws("both")
+
+## clean up person names
+user_logins <- cleanProperty(users, type = "name") %>%
+  unlist() %>%
+  cleanProperty(.) %>%
+  unlist()
+## create persons json
+users_df <- data.frame(
+  id = replicate(length(users), mongoIdMaker()),
+  login = user_logins,
+  name = users,
+  bio = c("A great bio"),
+  email = c("contact@example.org"),
+  avatarUrl = NA
+) %>% arrange(name)
+
+users_json <- toJSON(list(users = users_df), pretty = TRUE)
+if (overwrite) write(users_json, "seedData/users.json")
+
+#### Org Memberships ####
+org_members <- persons %>%
+  separate_rows(organizations, sep = ",") %>%
+  mutate(organizations = trimws(organizations)) %>%
+  select(fullName, organizations) %>%
+  distinct(across(everything())) %>%
+  drop_na()
+
+## validation
+org_member_org_invalid <- setdiff(org_members$organizations %>% na.omit(), orgs_df$name)
+if (length(org_member_org_invalid) > 0) {
+  stop(paste0(sQuote(org_member_org_invalid), collapse = ", "), " not match the name in organizations")
+}
+
+## replace name with Ids
+org_members <- org_members %>%
+  mutate(
+    userIds = users_df$id[match(fullName, users_df$name)],
+    orgIds = orgs_df$id[match(organizations, orgs_df$name)]
+  )
+## create org-membership json
+org_members_df <- data.frame(
+  id = replicate(nrow(org_members), mongoIdMaker()),
+  state = c("active"),
+  role = c("admin"),
+  organizationId = org_members$orgIds,
+  userId = org_members$userIds
 )
+org_members_json <- toJSON(list(orgMemberships = org_members_df), pretty = TRUE)
+if (overwrite) write(org_members_json, "seedData/org-memberships.json")
 
-# create person object json 
-persons_df <- persons_data %>% 
-  filter(!is.na(firstName)) %>% 
-  mutate(firstName = trimws(firstName, "both"),
-         lastName = trimws(lastName, "both")) %>%
-  select(6, 2, 3, 5) 
-persons_df$organizationIds <- I(cleanProperty(persons_df$organizationIds))
-makeQuiet(
-  lapply(1:nrow(persons_df), function(i) {
-    if (is.na(persons_df$organizationIds[i])) {
-      persons_df$organizationIds[i] <<- I(list(data.frame()))
-    }
-  })
+#### Challenge Platforms ####
+platforms <- googlesheets4::read_sheet(lanscape_url, sheet = "platforms", col_types = "cc") %>%
+  janitor::remove_empty(which = "rows")
+## create platform login
+platform_logins <- cleanProperty(platforms$platformName) %>% unlist()
+## create platform avatar
+platform_avatar <- ifelse(file.exists(file.path(path_to_rocc_app, "images/logo/", paste0(platform_logins, ".png"))),
+  paste0("https://github.com/Sage-Bionetworks/rocc-app/raw/main/images/logo/", platform_logins, ".png"),
+  "https://via.placeholder.com/200x200"
 )
-persons.json <- toJSON(list(persons=persons_df), pretty = TRUE)
-if (overwrite) write(persons.json, "seedData/persons.json")
+## create platform json
+platforms_df <- data.frame(
+  id = replicate(nrow(platforms), mongoIdMaker()),
+  name = platform_logins,
+  displayName = platforms$platformName,
+  websiteUrl = platforms$url,
+  avatarUrl = platform_avatar
+) %>% arrange(name)
+platforms_json <- toJSON(list(challengePlatforms = platforms_df), pretty = TRUE)
+if (overwrite) write(platforms_json, "seedData/challenge-platforms.json")
 
-# old  ----
-# persons <- persons_data %>% select(1:3, 5) %>% nest_legacy(!challengeName, .key = "organizers")
-# # if empty, change to empty data.frame, so toJSON later can convert it to an empty array
-# makeQuiet(
-#   lapply(1:nrow(persons), function(i) {
-#     if (is.null(persons$organizers[[i]]) || is.na(persons$organizers[[i]]$firstName)) {
-#       print(i)
-#       persons$organizers[[i]] <<- I(data.frame())
-#     }
-#   })
-# )
-# old  ----
-
-#### grants ####
-# Only collected three for example
-grants_data <- googlesheets4::read_sheet(lanscape_url, sheet = "grants", col_types = "ccccc")
-# remove new line symbol
-grants_data$description <- gsub("\n", " ", grants_data$description, fixed = TRUE) 
-grants_data$grantId <- sapply(1:3, function(i) idMaker() %>% mongoIdMaker())
-# reorder and only use id, name, description
-grants_data <- grants_data[, c("grantId", "name", "description")]
-colnames(grants_data)[1] <- "id"
-grants.json <- toJSON(list(grants=grants_data), pretty = TRUE)
-if (overwrite) write(grants.json, "seedData/grants.json")
-# TODO: below code only work when challenge only has one grant, fix when we have more info
-grants <- sapply(meta$challengeGrants, function(g) {
-  name <- intersect(g, grants_data$name)
-  if (length(name) > 0) return(grants_data$grantId[grants_data$name == name]) else list(data.frame())
-  # })ifelse(meta$challengeGrants %in% grants_data$name, grants_data$grantId, list(data.frame()))
-})
 #### challenges ####
-# trim summary to short descriptions for now
-meta$challengeSummary <- gsub("\n", " ", meta$challengeSummary, fixed = TRUE) 
-short_summary <- 
-  ifelse(nchar(meta$challengeSummary) > 280, 
-         paste0(substr(meta$challengeSummary, 1, 276), " ..."),
-         meta$challengeSummary)
+## validation
+challenge_platform_invalid <- setdiff(meta$challengePlatform %>% na.omit(), platforms_df$displayName)
+if (length(challenge_platform_invalid) > 0) {
+  stop(paste0(sQuote(challenge_platform_invalid), collapse = ", "), " not match the name in platforms")
+}
+challenge_host_invalid <- setdiff(meta$challengeHost %>% na.omit(), orgs_df$name)
+if (length(challenge_host_invalid) > 0) {
+  stop(paste0(sQuote(challenge_host_invalid), collapse = ", "), " not match the name in organizations")
+}
+challenge_topic_invalide <- unlist(topics)[nchar((unlist(topics))) > 30 | nchar(unlist(topics)) < 3]
+if (length(challenge_topic_invalide) > 0) {
+  stop(paste0(sQuote(challenge_topic_invalide), collapse = ", "), " not fulfill topic length limits")
+}
+## create challenge url
+challenges_df <- data.frame(
+  id = replicate(nrow(meta), mongoIdMaker()),
+  name = cleanProperty(meta$challengeName) %>% unlist(),
+  displayName = meta$challengeName,
+  description = c("This challenge is an awesome challenge."),
+  startDate = meta$challengeStart,
+  endDate = meta$challengeEnd,
+  websiteUrl = meta$challengeSite,
+  status = meta$challengeStatus,
+  platformId = platforms_df$id[match(meta$challengePlatform, platforms_df$displayName)],
+  ownerId = orgs_df$id[match(meta$challengeHost, orgs_df$name)],
+  topics = I(cleanProperty(meta$challengeKeywords)),
+  fullName = c(""),
+  createdAt = c(""),
+  updatedAt = c("")
+)
+challenges_json <- prettify(toJSON(list(challenges = challenges_df), pretty = T), indent = 2)
+if (overwrite) write(challenges_json, "seedData/challenges.json")
 
-challenges.df <-
-  data.frame(name = meta$challengeName,
-             description = short_summary,
-             summary = meta$challengeSummary,
-             # if no dates aka NA, it will be excluded
-             startDate = as.Date(meta$challengeStart, "%Y-%m-%d"), 
-             endDate = as.Date(meta$challengeEnd, "%Y-%m-%d"),
-             url = paste0("https://www.synapse.org/#!Synapse:", meta$challengeSite),
-             status = meta$challengeStatus,
-             tagIds = I(cleanProperty(meta$challengeKeywords)),
-             organizerIds = I(persons),
-             dataProviderIds = I(dataProviders_data),
-             # empty for now
-             grantIds = I(grants) 
-  )
-challenges.json <- prettify(toJSON(list(challenges=challenges.df), pretty = T), indent = 2)
-
-if (overwrite) write(challenges.json, "seedData/challenges.json")
+#### Challenge READMEs ####
+readmes_df <- data.frame(
+  challengeId = challenges_df$id,
+  text = trimws(meta$challengeSummary, "both")
+)
+readmes_json <- prettify(toJSON(list(challengeReadmes = readmes_df), pretty = T), indent = 2)
+if (overwrite) write(readmes_json, "seedData/challenge-readmes.json")
 
 # cp file to rocc-app
-if (overwrite) {
-  system(paste0('cp seedData/tags.json ', path_to_save_json))
-  system(paste0('cp seedData/organizations.json ', path_to_save_json))
-  system(paste0('cp seedData/grants.json ', path_to_save_json))
-  system(paste0('cp seedData/persons.json ', path_to_save_json))
-  system(paste0('cp seedData/challenges.json ', path_to_save_json))
-}
+# if (overwrite) {
+#   system(paste0("cp seedData/*.json ", path_to_rocc_app, "src/app/seeds/production/"))
+# }
