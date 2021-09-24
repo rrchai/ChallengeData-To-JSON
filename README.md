@@ -4,10 +4,12 @@
 
 ## Setup
 
-1. Install R dependencies:
-   R -e "renv::consent(provided=TRUE)"
-   R -e "renv::restore()"
+1. Use the `rocc-service` conda environment from [rocc-service](https://github.com/Sage-Bionetworks/rocc-service)
+
+   conda activate rocc-service
+
 2. modify the config file
+
    cp example_config.R config.R
 
 ## Usage

@@ -6,7 +6,7 @@ source("utlis.R")
 source("config.R")
 
 options(gargle_oauth_email = your_email_address) # for googlesheet
-overwrite <- TRUE
+overwrite <- FALSE
 
 dir.create("seedData", showWarnings = FALSE)
 
@@ -34,7 +34,7 @@ org_logins <- cleanProperty(orgs$challengeOrganization) %>% unlist()
 ## create orgs avatar
 orgs_avatar <- ifelse(file.exists(file.path(path_to_rocc_app, "images/logo/", paste0(org_logins, ".png"))),
   paste0("https://github.com/Sage-Bionetworks/rocc-app/raw/main/images/logo/", org_logins, ".png"),
-  ""
+  NA
 )
 ## create orgs json
 orgs_df <- data.frame(
@@ -83,7 +83,7 @@ users_df <- data.frame(
   name = users,
   bio = c("A great bio"),
   email = c("contact@example.org"),
-  avatarUrl = c("")
+  avatarUrl = NA
 ) %>% arrange(name)
 
 users_json <- toJSON(list(users = users_df), pretty = TRUE)
@@ -106,7 +106,7 @@ if (length(org_member_org_invalid) > 0) {
 ## replace name with Ids
 org_members <- org_members %>%
   mutate(
-    userIds = persons_df$id[match(fullName, persons_df$name)],
+    userIds = users_df$id[match(fullName, users_df$name)],
     orgIds = orgs_df$id[match(organizations, orgs_df$name)]
   )
 ## create org-membership json
@@ -128,7 +128,7 @@ platform_logins <- cleanProperty(platforms$platformName) %>% unlist()
 ## create platform avatar
 platform_avatar <- ifelse(file.exists(file.path(path_to_rocc_app, "images/logo/", paste0(platform_logins, ".png"))),
   paste0("https://github.com/Sage-Bionetworks/rocc-app/raw/main/images/logo/", platform_logins, ".png"),
-  ""
+  "https://via.placeholder.com/200x200"
 )
 ## create platform json
 platforms_df <- data.frame(
@@ -151,6 +151,11 @@ challenge_host_invalid <- setdiff(meta$challengeHost %>% na.omit(), orgs_df$name
 if (length(challenge_host_invalid) > 0) {
   stop(paste0(sQuote(challenge_host_invalid), collapse = ", "), " not match the name in organizations")
 }
+challenge_topic_invalide <- unlist(topics)[nchar((unlist(topics))) > 30 | nchar(unlist(topics)) < 3]
+if (length(challenge_topic_invalide) > 0) {
+  stop(paste0(sQuote(challenge_topic_invalide), collapse = ", "), " not fulfill topic length limits")
+}
+## create challenge url
 challenges_df <- data.frame(
   id = replicate(nrow(meta), mongoIdMaker()),
   name = cleanProperty(meta$challengeName) %>% unlist(),
@@ -179,6 +184,6 @@ readmes_json <- prettify(toJSON(list(challengeReadmes = readmes_df), pretty = T)
 if (overwrite) write(readmes_json, "seedData/challenge-readmes.json")
 
 # cp file to rocc-app
-if (overwrite) {
-  system(paste0("cp seedData/*.json ", path_to_rocc_app, "src/app/seeds/production/"))
-}
+# if (overwrite) {
+#   system(paste0("cp seedData/*.json ", path_to_rocc_app, "src/app/seeds/production/"))
+# }
