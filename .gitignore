@@ -1,6 +1,6 @@
 # History files
 *.Rhistory
-
+.DS_Store
 # Data
 *.RData
 *.csv
@@ -8,4 +8,5 @@ seedData/
 
 # R Environment Variables
 config.R
+tmp.R
 .Rproj.user

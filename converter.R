@@ -6,7 +6,7 @@ source("utlis.R")
 source("config.R")
 
 options(gargle_oauth_email = your_email_address) # for googlesheet
-overwrite <- FALSE
+overwrite <- TRUE
 
 dir.create("seedData", showWarnings = FALSE)
 
@@ -38,13 +38,14 @@ orgs_avatar <- ifelse(file.exists(file.path(path_to_rocc_app, "images/logo/", pa
 )
 ## create orgs json
 orgs_df <- data.frame(
-  id = replicate(nrow(orgs), mongoIdMaker()),
+  `_id` = replicate(nrow(orgs), mongoIdMaker()),
   login = org_logins,
   name = orgs$challengeOrganization,
   description = c("This is an awesome organization"),
   email = c("contact@example.org"),
   websiteUrl = orgs$url,
-  avatarUrl = orgs_avatar
+  avatarUrl = orgs_avatar,
+  check.names = FALSE
 ) %>% arrange(name)
 orgs_json <- toJSON(list(organizations = orgs_df), pretty = TRUE)
 if (overwrite) write(orgs_json, "seedData/organizations.json")
@@ -78,12 +79,13 @@ user_logins <- cleanProperty(users, type = "name") %>%
   unlist()
 ## create persons json
 users_df <- data.frame(
-  id = replicate(length(users), mongoIdMaker()),
+  `_id` = replicate(length(users), mongoIdMaker()),
   login = user_logins,
   name = users,
   bio = c("A great bio"),
   email = c("contact@example.org"),
-  avatarUrl = NA
+  avatarUrl = NA,
+  check.names = FALSE
 ) %>% arrange(name)
 
 users_json <- toJSON(list(users = users_df), pretty = TRUE)
@@ -106,19 +108,20 @@ if (length(org_member_org_invalid) > 0) {
 ## replace name with Ids
 org_members <- org_members %>%
   mutate(
-    userIds = users_df$id[match(fullName, users_df$name)],
-    orgIds = orgs_df$id[match(organizations, orgs_df$name)]
+    userIds = users_df$`_id`[match(fullName, users_df$name)],
+    orgIds = orgs_df$`_id`[match(organizations, orgs_df$name)]
   )
 ## create org-membership json
 org_members_df <- data.frame(
-  id = replicate(nrow(org_members), mongoIdMaker()),
+  `_id` = replicate(nrow(org_members), mongoIdMaker()),
   state = c("active"),
   role = c("admin"),
   organizationId = org_members$orgIds,
-  userId = org_members$userIds
+  userId = org_members$userIds,
+  check.names = FALSE
 )
 org_members_json <- toJSON(list(orgMemberships = org_members_df), pretty = TRUE)
-if (overwrite) write(org_members_json, "seedData/org-memberships.json")
+if (overwrite) write(org_members_json, "seedData/orgMemberships.json")
 
 #### Challenge Platforms ####
 platforms <- googlesheets4::read_sheet(lanscape_url, sheet = "platforms", col_types = "cc") %>%
@@ -132,14 +135,15 @@ platform_avatar <- ifelse(file.exists(file.path(path_to_rocc_app, "images/logo/"
 )
 ## create platform json
 platforms_df <- data.frame(
-  id = replicate(nrow(platforms), mongoIdMaker()),
+  `_id` = replicate(nrow(platforms), mongoIdMaker()),
   name = platform_logins,
   displayName = platforms$platformName,
   websiteUrl = platforms$url,
-  avatarUrl = platform_avatar
+  avatarUrl = platform_avatar,
+  check.names = FALSE
 ) %>% arrange(name)
 platforms_json <- toJSON(list(challengePlatforms = platforms_df), pretty = TRUE)
-if (overwrite) write(platforms_json, "seedData/challenge-platforms.json")
+if (overwrite) write(platforms_json, "seedData/challengePlatforms.json")
 
 #### challenges ####
 ## validation
@@ -157,7 +161,7 @@ if (length(challenge_topic_invalide) > 0) {
 }
 ## create challenge url
 challenges_df <- data.frame(
-  id = replicate(nrow(meta), mongoIdMaker()),
+  `_id` = replicate(nrow(meta), mongoIdMaker()),
   name = cleanProperty(meta$challengeName) %>% unlist(),
   displayName = meta$challengeName,
   description = c("This challenge is an awesome challenge."),
@@ -165,25 +169,31 @@ challenges_df <- data.frame(
   endDate = meta$challengeEnd,
   websiteUrl = meta$challengeSite,
   status = meta$challengeStatus,
-  platformId = platforms_df$id[match(meta$challengePlatform, platforms_df$displayName)],
-  ownerId = orgs_df$id[match(meta$challengeHost, orgs_df$name)],
+  platformId = platforms_df$`_id`[match(meta$challengePlatform, platforms_df$displayName)],
+  ownerId = orgs_df$`_id`[match(meta$challengeHost, orgs_df$name)],
   topics = I(cleanProperty(meta$challengeKeywords)),
-  fullName = c(""),
+  fullName = paste0(orgs_df$login[match(meta$challengeHost, orgs_df$name)], 
+                    "/", 
+                    cleanProperty(meta$challengeName) %>% unlist()),
   createdAt = c(""),
-  updatedAt = c("")
+  updatedAt = c(""),
+  check.names = FALSE
 )
 challenges_json <- prettify(toJSON(list(challenges = challenges_df), pretty = T), indent = 2)
 if (overwrite) write(challenges_json, "seedData/challenges.json")
 
 #### Challenge READMEs ####
 readmes_df <- data.frame(
-  challengeId = challenges_df$id,
-  text = trimws(meta$challengeSummary, "both")
+  `_id` = replicate(nrow(challenges_df), mongoIdMaker()),
+  challengeId = challenges_df$`_id`,
+  text = trimws(meta$challengeSummary, "both"),
+  check.names = FALSE
 )
 readmes_json <- prettify(toJSON(list(challengeReadmes = readmes_df), pretty = T), indent = 2)
-if (overwrite) write(readmes_json, "seedData/challenge-readmes.json")
+if (overwrite) write(readmes_json, "seedData/challengeReadmes.json")
 
 # cp file to rocc-app
-# if (overwrite) {
-#   system(paste0("cp seedData/*.json ", path_to_rocc_app, "src/app/seeds/production/"))
-# }
+if (overwrite) {
+  file_list <- list.files("seedData", ".json$")
+  file.copy(from = paste0("seedData/", file_list), to = save_path, overwrite = TRUE)
+}
