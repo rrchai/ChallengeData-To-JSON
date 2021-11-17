@@ -47,7 +47,10 @@ orgs_df <- data.frame(
   avatarUrl = orgs_avatar,
   check.names = FALSE
 ) %>% arrange(name)
-orgs_json <- toJSON(list(organizations = orgs_df), pretty = TRUE)
+
+# only create neccessary org accounts
+orgs_json <- toJSON(list(organizations = orgs_df %>% filter(name %in% unique(meta$challengeHost))), 
+                    pretty = TRUE)
 if (overwrite) write(orgs_json, "seedData/organizations.json")
 
 #### Persons ####
@@ -69,22 +72,29 @@ if (length(person_org_invalid) > 0) {
   stop(paste0(sQuote(person_org_invalid), collapse = ", "), " not match the name in organizations")
 }
 
-## only take unique persons for now, for users.json
-users <- unique(persons$fullName) %>% trimws("both")
+## clean up organizers names
+persons$login <- persons$fullName %>% 
+  cleanProperty(type = "name") %>% 
+  unlist() 
+persons$`_id` <- replicate(nrow(persons), mongoIdMaker())
 
-## clean up person names
-user_logins <- cleanProperty(users, type = "name") %>%
-  unlist() %>%
-  cleanProperty(.) %>%
-  unlist()
+#### Users ####
+user_names <- c("Thomas Schaffter", "Rong Chai",
+                "Verena Chung", "Jiaxin Zhang",
+                "Jake Albrecht", "Michael Mason")
 ## create persons json
 users_df <- data.frame(
-  `_id` = replicate(length(users), mongoIdMaker()),
-  login = user_logins,
-  name = users,
+  `_id` = replicate(length(user_names), mongoIdMaker()),
+  login = unlist(cleanProperty(user_names, type = "name")),
+  name = user_names,
   bio = c("A great bio"),
   email = c("contact@example.org"),
-  avatarUrl = NA,
+  avatarUrl = c("https://avatars.githubusercontent.com/u/3056480", 
+                "https://avatars.githubusercontent.com/u/73901500",
+                "https://avatars.githubusercontent.com/u/9377970",
+                "https://avatars.githubusercontent.com/u/5205872",
+                "https://avatars.githubusercontent.com/u/6445835",
+                "https://avatars.githubusercontent.com/u/16109262"),
   check.names = FALSE
 ) %>% arrange(name)
 
@@ -108,7 +118,7 @@ if (length(org_member_org_invalid) > 0) {
 ## replace name with Ids
 org_members <- org_members %>%
   mutate(
-    userIds = users_df$`_id`[match(fullName, users_df$name)],
+    userIds = persons$`_id`[match(fullName, persons$fullName)],
     orgIds = orgs_df$`_id`[match(organizations, orgs_df$name)]
   )
 ## create org-membership json
@@ -145,6 +155,15 @@ platforms_df <- data.frame(
 platforms_json <- toJSON(list(challengePlatforms = platforms_df), pretty = TRUE)
 if (overwrite) write(platforms_json, "seedData/challengePlatforms.json")
 
+#### Challenge READMEs ####
+readmes_df <- data.frame(
+  `_id` = replicate(nrow(meta), mongoIdMaker()),
+  text = trimws(meta$challengeSummary, "both"),
+  check.names = FALSE
+)
+readmes_json <- prettify(toJSON(list(challengeReadmes = readmes_df), pretty = T), indent = 2)
+if (overwrite) write(readmes_json, "seedData/challengeReadmes.json")
+
 #### challenges ####
 ## validation
 challenge_platform_invalid <- setdiff(meta$challengePlatform %>% na.omit(), platforms_df$displayName)
@@ -169,6 +188,7 @@ challenges_df <- data.frame(
   endDate = meta$challengeEnd,
   websiteUrl = meta$challengeSite,
   status = meta$challengeStatus,
+  readmeId = readmes_df$`_id`,
   platformId = platforms_df$`_id`[match(meta$challengePlatform, platforms_df$displayName)],
   ownerId = orgs_df$`_id`[match(meta$challengeHost, orgs_df$name)],
   topics = I(cleanProperty(meta$challengeKeywords)),
@@ -182,18 +202,62 @@ challenges_df <- data.frame(
 challenges_json <- prettify(toJSON(list(challenges = challenges_df), pretty = T), indent = 2)
 if (overwrite) write(challenges_json, "seedData/challenges.json")
 
-#### Challenge READMEs ####
-readmes_df <- data.frame(
-  `_id` = replicate(nrow(challenges_df), mongoIdMaker()),
-  challengeId = challenges_df$`_id`,
-  text = trimws(meta$challengeSummary, "both"),
+#### Challenge Organizers ####
+## assume persons with same name in different challenge are not the same organizers
+## create organizers json
+organizers_df <- data.frame(
+  `_id` = replicate(nrow(persons), mongoIdMaker()),
+  name = persons$fullName,
+  roles = I(replicate(nrow(persons), data.frame())),
+  challengeId = challenges_df$`_id`[match(persons$challengeName, challenges_df$displayName)],
+  check.names = FALSE
+) %>% arrange(name)
+
+organizers_json <- toJSON(list(challengeOrganizers = organizers_df), pretty = TRUE)
+if (overwrite) write(organizers_json, "seedData/challengeOrganizers.json")
+
+#### Challenge Supporting ####
+## collect the data for supporting organizations
+sponsors <- meta[, c("challengeName", "challengeSponsors", "dataContributors")] %>% 
+  separate_rows(challengeSponsors, sep = ",") %>%
+  separate_rows(dataContributors, sep = ",") %>%
+  mutate(challengeSponsors=trimws(challengeSponsors, "both"),
+         dataContributors=trimws(dataContributors, "both")) %>%
+  reshape2::melt(id.vars = "challengeName", variable.name = "roles", value.name = "organizations", na.rm = TRUE)
+
+## use proper roles
+sponsors$roles <- ifelse(sponsors$roles == "dataContributors", "DataProvider", NA)
+
+## validation
+sponsors_invalid <- setdiff(sponsors$organizations %>% na.omit(), orgs_df$name)
+if (length(sponsors_invalid) > 0) {
+  stop(paste0(sQuote(sponsors_invalid), collapse = ", "), " not match the name in orgs")
+}
+
+## collapse by challenge
+sponsors <- sponsors %>% 
+  mutate(login=orgs_df$login[match(sponsors$organizations, orgs_df$name)]) %>% 
+  group_by(across(c(-roles))) %>%
+  summarise(roles = str_c(roles %>% na.omit() %>% unique(), collapse = ","), .groups = 'drop')
+
+## create organizers json
+sponsors_df <- data.frame(
+  `_id` = replicate(nrow(sponsors), mongoIdMaker()),
+  name = sponsors$organizations,
+  roles = I(replicate(nrow(sponsors), data.frame())),
+  challengeId = challenges_df$`_id`[match(sponsors$challengeName, challenges_df$displayName)],
   check.names = FALSE
 )
-readmes_json <- prettify(toJSON(list(challengeReadmes = readmes_df), pretty = T), indent = 2)
-if (overwrite) write(readmes_json, "seedData/challengeReadmes.json")
+inx <- which(sponsors$roles == "DataProvider")
+sponsors_df$roles[inx] <- I(data.frame("DataProvider")) 
+
+sponsors_json <- toJSON(list(challengeSponsors = sponsors_df), pretty = TRUE)
+if (overwrite) write(sponsors_json, "seedData/challengeSponsors.json")
 
 # cp file to rocc-app
 if (overwrite) {
   file_list <- list.files("seedData", ".json$")
-  file.copy(from = paste0("seedData/", file_list), to = save_path, overwrite = TRUE)
+  file.copy(from = paste0("seedData/", file_list), 
+            to = "~/Clone/rocc/rocc-db-client/data/seeds/production/", 
+            overwrite = TRUE)
 }
